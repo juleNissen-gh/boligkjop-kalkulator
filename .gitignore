@@ -8,6 +8,9 @@ env/
 venv/
 ENV/
 
+# Personal configuration (DO NOT COMMIT)
+my_config.py
+
 # Scraped data
 *.json
 *.html

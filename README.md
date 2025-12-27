@@ -39,48 +39,45 @@ result = calculate_loan(
 
 ### 2. Finn.no Scraper (automatisk søk)
 
-#### Steg 1: Få din finn.no søke-URL
+#### Steg 1: Opprett din personlige config-fil
 
-1. Gå til [finn.no/realestate/homes](https://www.finn.no/realestate/homes/search.html)
-2. Sett filtre (sted, pris, soverom, osv.)
-3. Kopier hele URL-en fra adressefeltet
-4. **Tips:** Legg til `&sort=PRICE_ASC` på slutten for å sortere etter pris (lavest først)
-
-**Eksempel URL:**
-```
-https://www.finn.no/realestate/homes/search.html?location=0.20001&sort=PRICE_ASC&min_bedrooms=2
-```
-
-#### Steg 2: Oppdater parametere i `finn_scraper_selenium.py`
-
-Åpne `finn_scraper_selenium.py` og finn `main()` funksjonen (linje ~303). Oppdater:
+Lag en fil `my_config.py` i samme mappe (denne filen blir **ikke** committet til GitHub):
 
 ```python
-# Lim inn din finn.no URL her:
-search_url = "<Lim inn URL fra steg 1>"
+"""Personal configuration"""
 
-# Juster disse verdiene til din situasjon:
-loan_params = {
-    'down_payment': 500_000,        # DIN egenkapital
-    'loan_term_years': 30,          # Nedbetalingstid
-    'annual_interest_rate': 0.05,   # Årlig rente (sjekk bank.no)
-    'num_co_owners': 2,             # Antall medeiere
-    'rent_per_room': 6_000,         # Forventet leie per rom
-    'annual_appreciation_rate': 0.03, # Forventet verdistigning per år
+# Your finn.no search URL
+# Go to finn.no, set filters (location, price, bedrooms, etc.), copy the URL
+# Tip: Add &sort=PRICE_ASC to sort by price (low to high)
+SEARCH_URL = "https://www.finn.no/realestate/homes/search.html?location=0.20001&sort=PRICE_ASC&min_bedrooms=2"
+
+# Your personal loan parameters
+LOAN_PARAMS = {
+    'down_payment': 800_000,        # Your down payment (egenkapital)
+    'loan_term_years': 30,          # Loan term
+    'annual_interest_rate': 0.0508, # Annual interest rate
+    'num_co_owners': 2,             # Number of co-owners
+    'rent_per_room': 6_500,         # Expected rent per room
+    'annual_appreciation_rate': 0.036, # Expected annual appreciation
 }
+
+# Maximum property price to consider
+MAX_PRICE = 5_200_000
 ```
 
-#### Steg 3: Kjør scraperen
+#### Steg 2: Kjør scraperen
 
 ```bash
 python finn_scraper_selenium.py
 ```
 
-Scraperen vil:
+Scraperen vil automatisk laste verdiene fra `my_config.py` og:
 - Hente alle boliger fra ditt søk
 - Beregne lånekostnader for hver bolig
 - Sortere etter laveste netto månedlig kostnad
 - Lagre resultatene til `finn_properties_selenium.json`
+
+**Merk:** Hvis `my_config.py` ikke eksisterer, vil scraperen bruke eksempel-verdier fra koden.
 
 ## Hvordan det fungerer
 

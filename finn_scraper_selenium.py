@@ -304,28 +304,36 @@ def main():
     """
     Example usage
     """
-    # Custom search URL with your specific filters
-    # Go to finn.no, set your filters (location, price, bedrooms, etc.), then copy the URL here
-    # Tip: Add &sort=PRICE_ASC to sort by price (low to high)
-    search_url = "<Insert your finn.no search URL here>"
+    # Try to load personal config, fall back to example values
+    try:
+        from my_config import SEARCH_URL, LOAN_PARAMS, MAX_PRICE
+        search_url = SEARCH_URL
+        loan_params = LOAN_PARAMS
+        max_price = MAX_PRICE
+        print("Using configuration from my_config.py")
+    except ImportError:
+        print("my_config.py not found - using example values")
+        print("Create my_config.py with your personal settings (see README)")
 
-    # Loan parameters - adjust these to match your situation
-    loan_params = {
-        'down_payment': 500_000,  # Your down payment (egenkapital)
-        'loan_term_years': 30,
-        'annual_interest_rate': 0.05,
-        'num_co_owners': 2,
-        'rent_per_room': 6_000,
-        'annual_appreciation_rate': 0.03,
-    }
+        # Example values - replace these or create my_config.py
+        search_url = "<Insert your finn.no search URL here>"
+        loan_params = {
+            'down_payment': 500_000,  # Your down payment (egenkapital)
+            'loan_term_years': 30,
+            'annual_interest_rate': 0.05,
+            'num_co_owners': 2,
+            'rent_per_room': 6_000,
+            'annual_appreciation_rate': 0.03,
+        }
+        max_price = 5_000_000
 
     scraper = FinnPropertyScraperSelenium(headless=False)  # Set to True to hide browser
 
     try:
-        # Scrape all properties up to 5,000,000 kr
+        # Scrape all properties up to max_price
         properties = scraper.scrape_all(
             search_url=search_url,
-            max_price=5_000_000,
+            max_price=max_price,
             loan_params=loan_params
         )
 
