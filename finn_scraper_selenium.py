@@ -305,17 +305,18 @@ def main():
     Example usage
     """
     # Custom search URL with your specific filters
-    # sort=PRICE_ASC ensures properties are sorted by price low to high
-    search_url = "https://www.finn.no/realestate/homes/search.html?filters=&sort=PRICE_ASC&min_bedrooms=2&polylocation=10.395275315134995+63.41141872245231%2C10.437011805853956+63.4190233278683%2C10.402728259907093+63.44249148933281%2C10.371425891867489+63.42662591657256%2C10.395275315134995+63.41141872245231"
+    # Go to finn.no, set your filters (location, price, bedrooms, etc.), then copy the URL here
+    # Tip: Add &sort=PRICE_ASC to sort by price (low to high)
+    search_url = "<Insert your finn.no search URL here>"
 
-    # Loan parameters from loan_calculator.py example
+    # Loan parameters - adjust these to match your situation
     loan_params = {
-        'down_payment': 800_000,
+        'down_payment': 500_000,  # Your down payment (egenkapital)
         'loan_term_years': 30,
-        'annual_interest_rate': 0.0508,
+        'annual_interest_rate': 0.05,
         'num_co_owners': 2,
-        'rent_per_room': 6_500,
-        'annual_appreciation_rate': 0.036,
+        'rent_per_room': 6_000,
+        'annual_appreciation_rate': 0.03,
     }
 
     scraper = FinnPropertyScraperSelenium(headless=False)  # Set to True to hide browser

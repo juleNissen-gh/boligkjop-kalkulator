@@ -53,14 +53,14 @@ if __name__ == "__main__":
     # Example values
     result = calculate_loan(
         property_price=5_000_000,
-        down_payment=400_000,
+        down_payment=500_000,  # Your down payment (egenkapital)
         loan_term_years=30,
-        annual_interest_rate=0.0508,
+        annual_interest_rate=0.05,
         num_bedrooms=4,
         num_co_owners=2,
-        rent_per_room=6_500,
+        rent_per_room=6_000,
         total_common_costs=4_000,
-        annual_appreciation_rate=0.036,
+        annual_appreciation_rate=0.03,
     )
     
     print("=== Din låneoversikt ===\n")
