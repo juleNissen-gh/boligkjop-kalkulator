@@ -17,10 +17,19 @@ def calculate_loan(
     rent_per_room: float,
     total_common_costs: float,
     annual_appreciation_rate: float,
+    eieform: str = 'Selveier',
 ) -> dict:
     """Calculate loan details for your share of a property."""
 
-    your_property_share = property_price / num_co_owners
+    # Add 2.5% dokumentavgift to property price, but only for selveier (not aksje or andel)
+    if eieform == 'Selveier':
+        dokumentavgift = property_price * 0.025
+        total_price_with_tax = property_price + dokumentavgift
+    else:
+        dokumentavgift = 0
+        total_price_with_tax = property_price
+
+    your_property_share = total_price_with_tax / num_co_owners
     your_loan_share = your_property_share - down_payment
     
     monthly_payment = calculate_monthly_payment(your_loan_share, annual_interest_rate, loan_term_years)
@@ -38,6 +47,7 @@ def calculate_loan(
     net_after_appreciation = net_monthly_cost - your_monthly_appreciation
     
     return {
+        "dokumentavgift": dokumentavgift,
         "your_loan_share": your_loan_share,
         "monthly_payment": monthly_payment,
         "your_common_costs": your_common_costs,

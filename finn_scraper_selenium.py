@@ -13,9 +13,89 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 import time
 import json
-from typing import List, Dict
+from typing import List, Dict, Optional
 import re
+from datetime import datetime
+from pathlib import Path
 from loan_calculator import calculate_loan
+
+# File to store price history
+PRICE_HISTORY_FILE = Path(__file__).parent / "price_history.json"
+
+
+def load_price_history() -> Dict:
+    """Load price history from file"""
+    if PRICE_HISTORY_FILE.exists():
+        with open(PRICE_HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return {}
+
+
+def save_price_history(history: Dict):
+    """Save price history to file"""
+    with open(PRICE_HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def extract_finnkode(url: str) -> Optional[str]:
+    """Extract finnkode (property ID) from URL"""
+    match = re.search(r'finnkode=(\d+)', url)
+    if match:
+        return match.group(1)
+    return None
+
+
+def update_price_history(url: str, current_price: int) -> Dict:
+    """
+    Update price history for a property and return price change info.
+    Returns dict with 'previous_prices' list and 'price_change' if changed.
+    """
+    if not current_price:
+        return {'previous_prices': [], 'price_change': None}
+
+    finnkode = extract_finnkode(url)
+    if not finnkode:
+        return {'previous_prices': [], 'price_change': None}
+
+    history = load_price_history()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    if finnkode not in history:
+        history[finnkode] = {
+            'url': url,
+            'prices': []
+        }
+
+    prop_history = history[finnkode]
+    previous_prices = prop_history['prices']
+
+    # Check if price has changed since last record
+    price_change = None
+    if previous_prices:
+        last_price = previous_prices[-1]['price']
+        if last_price != current_price:
+            price_change = current_price - last_price
+            # Add new price record
+            prop_history['prices'].append({
+                'date': today,
+                'price': current_price
+            })
+    else:
+        # First time seeing this property
+        prop_history['prices'].append({
+            'date': today,
+            'price': current_price
+        })
+
+    # Update URL in case it changed
+    prop_history['url'] = url
+
+    save_price_history(history)
+
+    return {
+        'previous_prices': previous_prices,
+        'price_change': price_change
+    }
 
 
 class FinnPropertyScraperSelenium:
@@ -85,20 +165,66 @@ class FinnPropertyScraperSelenium:
 
         return property_urls
 
-    def scrape_property(self, url: str) -> Dict:
+    def _try_dismiss_cookie_popup(self):
+        """Try to dismiss cookie popup if present (Finn.no uses iframe for consent)"""
+        try:
+            # Check for Finn.no consent iframe (sp_message_container)
+            consent_container = self.driver.find_elements(By.ID, "sp_message_container_1427790")
+            if consent_container:
+                # Try to find and switch to the consent iframe
+                iframes = self.driver.find_elements(By.XPATH, "//iframe[contains(@id, 'sp_message_iframe')]")
+                for iframe in iframes:
+                    try:
+                        self.driver.switch_to.frame(iframe)
+                        # Look for accept button inside iframe
+                        accept_buttons = self.driver.find_elements(By.XPATH,
+                            "//button[contains(text(), 'Godta') or contains(text(), 'Aksepter') or contains(text(), 'OK') or contains(text(), 'Accept')]")
+                        for btn in accept_buttons:
+                            try:
+                                btn.click()
+                                time.sleep(0.5)
+                                self.driver.switch_to.default_content()
+                                return True
+                            except:
+                                continue
+                        self.driver.switch_to.default_content()
+                    except:
+                        self.driver.switch_to.default_content()
+                        continue
+
+                # If clicking didn't work, try removing the overlay with JavaScript
+                self.driver.execute_script("""
+                    var container = document.getElementById('sp_message_container_1427790');
+                    if (container) container.remove();
+                """)
+                time.sleep(0.3)
+                return True
+        except:
+            pass
+        return False
+
+    def scrape_property(self, url: str, retry_count: int = 0) -> Dict:
         """
         Scrape individual property page for required information
+        retry_count: Number of retries attempted (for cookie popup handling)
         """
+        finnkode = extract_finnkode(url) or "unknown"
+
         property_data = {
             'url': url,
+            'finnkode': finnkode,
             'totalpris_inkl_fellesgjeld': None,
             'antall_soverom': None,
-            'felleskostnad': None
+            'felleskostnad': None,
+            'eieform': None  # selveier, aksje, or andel
         }
 
         try:
             self.driver.get(url)
-            time.sleep(1.5)  # Increased wait time for page to load
+            time.sleep(0.6)
+
+            # Try to dismiss cookie popup
+            self._try_dismiss_cookie_popup()
 
             # Check if we got blocked or redirected
             current_url = self.driver.current_url
@@ -131,6 +257,9 @@ class FinnPropertyScraperSelenium:
 
                             elif 'felleskost' in label or 'fellesutgifter' in label:
                                 property_data['felleskostnad'] = self._extract_price(value)
+
+                            elif 'eieform' in label:
+                                property_data['eieform'] = self._extract_eieform(value)
                     except:
                         continue
             except:
@@ -154,6 +283,11 @@ class FinnPropertyScraperSelenium:
                 felles_match = re.search(r'Felleskost(?:nad|/mnd\.).*?(\d[\d\s]+)', body_text)
                 if felles_match and not property_data['felleskostnad']:
                     property_data['felleskostnad'] = self._extract_price(felles_match.group(1))
+
+                # Look for eieform
+                eieform_match = re.search(r'Eieform[:\s]*(Selveier|Aksje|Andel)', body_text, re.IGNORECASE)
+                if eieform_match and not property_data['eieform']:
+                    property_data['eieform'] = self._extract_eieform(eieform_match.group(1))
 
             except:
                 pass
@@ -192,14 +326,25 @@ class FinnPropertyScraperSelenium:
             missing.append('felleskostnad')
 
         if missing:
-            print(f"  WARNING: Missing data: {', '.join(missing)}")
-            # Save screenshot for debugging
-            try:
-                screenshot_name = f"debug_{url.split('finnkode=')[-1]}.png"
-                self.driver.save_screenshot(screenshot_name)
-                print(f"  Screenshot saved to {screenshot_name}")
-            except:
-                pass
+            # Only warn about critical missing data (not felleskostnad)
+            critical_missing = [m for m in missing if m != 'felleskostnad']
+            if critical_missing:
+                # Retry once if critical data is missing (might be cookie popup)
+                if retry_count < 1:
+                    print(f"  Retrying (possible cookie popup)...")
+                    time.sleep(0.5)
+                    return self.scrape_property(url, retry_count=retry_count + 1)
+                print(f"  WARNING: Missing {', '.join(critical_missing)}")
+
+        # Track price history
+        price_info = update_price_history(url, property_data['totalpris_inkl_fellesgjeld'])
+        property_data['previous_prices'] = price_info['previous_prices']
+        property_data['price_change'] = price_info['price_change']
+
+        if price_info['price_change']:
+            change = price_info['price_change']
+            direction = "↓" if change < 0 else "↑"
+            print(f"  PRICE CHANGE: {direction} {abs(change):,} kr")
 
         return property_data
 
@@ -220,6 +365,19 @@ class FinnPropertyScraperSelenium:
         numbers = re.findall(r'\d+', text)
         if numbers:
             return int(numbers[0])
+        return None
+
+    def _extract_eieform(self, text: str) -> str:
+        """Extract and normalize eieform (ownership type)"""
+        if not text:
+            return None
+        text_lower = text.lower().strip()
+        if 'selveier' in text_lower:
+            return 'Selveier'
+        elif 'aksje' in text_lower:
+            return 'Aksje'
+        elif 'andel' in text_lower:
+            return 'Andel'
         return None
 
     def scrape_all(self, search_url: str = None, max_price: int = None, loan_params: dict = None) -> List[Dict]:
@@ -258,34 +416,33 @@ class FinnPropertyScraperSelenium:
                         consecutive_over_budget = 0
 
                 # Calculate loan if we have all required data and loan_params
-                if loan_params and data.get('totalpris_inkl_fellesgjeld') and data.get('antall_soverom') and data.get('felleskostnad'):
-                    try:
-                        loan_result = calculate_loan(
-                            property_price=data['totalpris_inkl_fellesgjeld'],
-                            down_payment=loan_params['down_payment'],
-                            loan_term_years=loan_params['loan_term_years'],
-                            annual_interest_rate=loan_params['annual_interest_rate'],
-                            num_bedrooms=data['antall_soverom'],
-                            num_co_owners=loan_params['num_co_owners'],
-                            rent_per_room=loan_params['rent_per_room'],
-                            total_common_costs=data['felleskostnad'],
-                            annual_appreciation_rate=loan_params['annual_appreciation_rate'],
-                        )
-                        data['loan_calculation'] = loan_result
-                    except Exception as e:
-                        print(f"  Error calculating loan: {e}")
-                        data['loan_calculation'] = None
+                if loan_params and data.get('totalpris_inkl_fellesgjeld') and data.get('antall_soverom'):
+                    # Use 0 for felleskostnad if missing or None
+                    felleskostnad = data.get('felleskostnad') or 0
+                    # Default to 'Selveier' if eieform is missing (conservative assumption)
+                    eieform = data.get('eieform') or 'Selveier'
+
+                    loan_result = calculate_loan(
+                        property_price=data['totalpris_inkl_fellesgjeld'],
+                        down_payment=loan_params['down_payment'],
+                        loan_term_years=loan_params['loan_term_years'],
+                        annual_interest_rate=loan_params['annual_interest_rate'],
+                        num_bedrooms=data['antall_soverom'],
+                        num_co_owners=loan_params['num_co_owners'],
+                        rent_per_room=loan_params['rent_per_room'],
+                        total_common_costs=felleskostnad,
+                        annual_appreciation_rate=loan_params['annual_appreciation_rate'],
+                        eieform=eieform,
+                    )
+                    data['loan_calculation'] = loan_result
 
                 results.append(data)
-
-                # Be polite - add delay between requests (increased to avoid rate limiting)
-                time.sleep(1.0)
 
             # Sort by net_monthly_cost if loan calculations were done
             if loan_params:
                 results = sorted(
                     results,
-                    key=lambda x: x.get('loan_calculation', {}).get('net_monthly_cost', float('inf'))
+                    key=lambda x: (x.get('loan_calculation') or {}).get('net_monthly_cost', float('inf'))
                 )
 
             return results
@@ -348,6 +505,22 @@ def main():
 
             price = prop.get('totalpris_inkl_fellesgjeld')
             print(f"  Totalpris: {price:,} kr" if price else "  Totalpris: N/A")
+
+            # Show price change if any
+            if prop.get('price_change'):
+                change = prop['price_change']
+                direction = "↓" if change < 0 else "↑"
+                print(f"  Prisendring: {direction} {abs(change):,} kr")
+
+            # Show price history if exists
+            if prop.get('previous_prices'):
+                print(f"  Prishistorikk:")
+                for record in prop['previous_prices']:
+                    print(f"    {record['date']}: {record['price']:,} kr")
+
+            eieform = prop.get('eieform')
+            print(f"  Eieform: {eieform}" if eieform else "  Eieform: N/A")
+
             print(f"  Antall soverom: {prop.get('antall_soverom')}" if prop.get('antall_soverom') else "  Antall soverom: N/A")
 
             felles = prop.get('felleskostnad')
